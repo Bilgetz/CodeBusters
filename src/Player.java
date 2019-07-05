@@ -5,14 +5,18 @@ import java.util.*;
  **/
 class Player {
 
-    public static int MAX_WIDTH = 16001;
-    public static int MAX_HEIGTH = 9001;
+    public static int MAX_WIDTH = 16000;
+    public static int MAX_HEIGTH = 9000;
 
-//    private static final int VISION_RANGE = 2200 ; //real range
-    public static final int VISION_RANGE = 2000 ;
+    //    private static final int VISION_RANGE = 2200 ; //real range
+    public static final int VISION_RANGE = 2000;
 
-    public static final int VISION_HEIGTH = MAX_WIDTH / VISION_RANGE ;
-    public static final int VISION_WIDTH = MAX_HEIGTH / VISION_RANGE;
+    public static final int MOVE_RANGE = 800;
+
+    public static final int CASE_SIZE = 500;
+
+    public static final int NB_HEIGTH = MAX_HEIGTH / CASE_SIZE;
+    public static final int NB_WIDTH = MAX_WIDTH / CASE_SIZE;
 
 
     private static final int RELEASE_RANGE = 1600;
@@ -33,7 +37,7 @@ class Player {
 
     public static Map<Integer, Ghosts> ghosts;
 
-    public static boolean[][] visited = new boolean[VISION_WIDTH][VISION_HEIGTH];
+    public static Case[][] caseMap = new Case[NB_WIDTH][NB_HEIGTH];
 
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
@@ -48,6 +52,31 @@ class Player {
         enemyMap = new HashMap<>();
 
         ghosts = new HashMap<>();
+
+        for (int j = 0; j < NB_HEIGTH; j++) {
+            for (int i = 0; i < NB_WIDTH; i++) {
+                caseMap[i][j] = new Case();
+            }
+        }
+
+        for (int j = 0; j < NB_HEIGTH; j++) {
+            for (int i = 0; i < NB_WIDTH; i++) {
+                Case currentCase = caseMap[i][j];
+                if (j > 0) {
+                    currentCase.neighbourg.add(caseMap[i][j - 1]);
+                }
+                if ((j + 1) < NB_HEIGTH) {
+                    currentCase.neighbourg.add(caseMap[i][j + 1]);
+                }
+                if (i > 0) {
+                    currentCase.neighbourg.add(caseMap[i - 1][j]);
+                }
+                if ((i + 1) < NB_WIDTH) {
+                    currentCase.neighbourg.add(caseMap[i + 1][j]);
+                }
+            }
+        }
+
 
         for (int i = 0; i < ghostCount; i++) {
             ghosts.put(i, new Ghosts(i));
@@ -75,6 +104,7 @@ class Player {
                         myList.add((Hunter) e);
                         myMap.put(i, (Hunter) e);
                     }
+                    caseMap[x / Player.CASE_SIZE][y / Player.CASE_SIZE].visited = true;
                 } else {
                     e = enemyMap.get(entityId);
                     if (e == null) {
@@ -89,26 +119,33 @@ class Player {
                 e.state = state;
                 e.value = value;
             }
+//            for (int j = 0; j < NB_HEIGTH; j++) {
+//                for (int i = 0; i < NB_WIDTH; i++) {
+//                    LOG.debugNoReturn(Player.caseMap[i][j].visited ? "X" : "O");
+//                }
+//                LOG.debugNoReturn('\n');
+//            }
+
+
             for (int i = 0; i < bustersPerPlayer; i++) {
 
                 // Write an action using System.out.println()
                 // To debug: System.err.println("Debug messages...");
 
                 Hunter hunter = myMap.get(i);
-                int x = 0;
+                int x = -1;
                 int y = 0;
-                LOG.debugNoReturn(Player.visited[x][y]);
-                while (x < VISION_WIDTH && Player.visited[x][y]) {
-                    while (y < VISION_HEIGTH && Player.visited[x][y]) {
-                        y++;
-                        LOG.debugNoReturn(Player.visited[x][y]);
-                    }
+                do {
                     x++;
-                    LOG.debugNoReturn('\n');
-               }
-               LOG.debug(Player.visited);
+                    y = 0;
+                    while (y < NB_HEIGTH && (caseMap[x][y].visited || caseMap[x][y].hasHunter)) {
+                        y++;
+                    }
+                    y = y == NB_HEIGTH ? NB_HEIGTH - 1 : y;
+                } while (x < NB_WIDTH && (caseMap[x][y].visited || caseMap[x][y].hasHunter));
 
-                hunter.move(x*VISION_RANGE, y*VISION_RANGE);
+                hunter.move(x * CASE_SIZE, y * CASE_SIZE);
+                caseMap[x][y].hasHunter = true;
             }
         }
     }
@@ -161,9 +198,11 @@ abstract class Entity extends Position implements Comparable<Entity> {
         return "";
     }
 
+    public void move(Position pos) {
+        move(pos.x, pos.y);
+    }
+
     public void move(int x, int y) {
-        Player.visited[x / Player.VISION_RANGE][y / Player.VISION_RANGE] = true;
-        LOG.debug("x=" + x/ Player.VISION_RANGE + "y="+ y / Player.VISION_RANGE);
         System.out.println("MOVE " + x + " " + y + " " + getMessage());
     }
 
@@ -199,6 +238,12 @@ abstract class Entity extends Position implements Comparable<Entity> {
                 ", y=" + y +
                 "} " + super.toString();
     }
+}
+
+class Case extends Position {
+    public boolean visited = false;
+    public boolean hasHunter = false;
+    public Collection<Case> neighbourg = new ArrayList<>();
 }
 
 
