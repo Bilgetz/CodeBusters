@@ -5,8 +5,15 @@ import java.util.*;
  **/
 class Player {
 
-    public static int LARGEUR_MAX = 16001;
-    public static int HAUTEUR_MAX = 9001;
+    public static int MAX_WIDTH = 16001;
+    public static int MAX_HEIGTH = 9001;
+
+//    private static final int VISION_RANGE = 2200 ; //real range
+    public static final int VISION_RANGE = 2000 ;
+
+    public static final int VISION_HEIGTH = MAX_WIDTH / VISION_RANGE ;
+    public static final int VISION_WIDTH = MAX_HEIGTH / VISION_RANGE;
+
 
     private static final int RELEASE_RANGE = 1600;
     public static int BUST_MAX = 1760;
@@ -26,7 +33,7 @@ class Player {
 
     public static Map<Integer, Ghosts> ghosts;
 
-    public static boolean[][] visited = new boolean[2000][2000];
+    public static boolean[][] visited = new boolean[VISION_WIDTH][VISION_HEIGTH];
 
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
@@ -58,7 +65,7 @@ class Player {
                 int value = in.nextInt(); // For busters: Ghost id being carried. For ghosts: number of busters attempting to trap this ghost.
 
                 Entity e;
-                LOG.debug(entityType);
+                //LOG.debug(entityType);
                 if (entityType == -1) {
                     e = ghosts.get(entityId);
                 } else if (myTeamId == entityType) {
@@ -76,7 +83,7 @@ class Player {
                         enemyMap.put(i, (Hunter) e);
                     }
                 }
-                LOG.debug(e);
+                //LOG.debug(e);
                 e.x = x;
                 e.y = y;
                 e.state = state;
@@ -88,8 +95,20 @@ class Player {
                 // To debug: System.err.println("Debug messages...");
 
                 Hunter hunter = myMap.get(i);
+                int x = 0;
+                int y = 0;
+                LOG.debugNoReturn(Player.visited[x][y]);
+                while (x < VISION_WIDTH && Player.visited[x][y]) {
+                    while (y < VISION_HEIGTH && Player.visited[x][y]) {
+                        y++;
+                        LOG.debugNoReturn(Player.visited[x][y]);
+                    }
+                    x++;
+                    LOG.debugNoReturn('\n');
+               }
+               LOG.debug(Player.visited);
 
-                hunter.move(8000, 4500);
+                hunter.move(x*VISION_RANGE, y*VISION_RANGE);
             }
         }
     }
@@ -104,8 +123,8 @@ class Ghosts extends Entity {
 
     public Ghosts getSymetric() {
         Ghosts g = new Ghosts(-1);
-        g.x = Player.LARGEUR_MAX - this.x;
-        g.y = Player.HAUTEUR_MAX - this.y;
+        g.x = Player.MAX_WIDTH - this.x;
+        g.y = Player.MAX_HEIGTH - this.y;
         return g;
     }
 
@@ -143,8 +162,8 @@ abstract class Entity extends Position implements Comparable<Entity> {
     }
 
     public void move(int x, int y) {
-        Player.visited[this.x / 2000][this.y / 2000] = true;
-        LOG.debug("x%=" + this.x % 2000 + "y%=" + this.y % 2000);
+        Player.visited[x / Player.VISION_RANGE][y / Player.VISION_RANGE] = true;
+        LOG.debug("x=" + x/ Player.VISION_RANGE + "y="+ y / Player.VISION_RANGE);
         System.out.println("MOVE " + x + " " + y + " " + getMessage());
     }
 
@@ -214,7 +233,7 @@ class LOG {
         System.err.println(c);
     }
 
-    public static void debugNoReturn(String s) {
+    public static void debugNoReturn(Object s) {
         System.err.print(s);
     }
 
