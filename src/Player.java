@@ -1,4 +1,5 @@
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Send your busters out into the fog to trap ghosts and bring them home!
@@ -8,12 +9,13 @@ class Player {
     public static int MAX_WIDTH = 16000;
     public static int MAX_HEIGTH = 9000;
 
-    //    private static final int VISION_RANGE = 2200 ; //real range
-    public static final int VISION_RANGE = 2000;
+    private static final int VISION_RANGE = 2200; //real range
 
     public static final int MOVE_RANGE = 800;
 
     public static final int CASE_SIZE = 500;
+
+    public static final int NB_CASE_VISION = VISION_RANGE / CASE_SIZE;
 
     public static final int NB_HEIGTH = MAX_HEIGTH / CASE_SIZE;
     public static final int NB_WIDTH = MAX_WIDTH / CASE_SIZE;
@@ -31,6 +33,7 @@ class Player {
 
     public static int STATE_BUSTER_NO_GHOST = 0; // Buster ne transportant pas de fantôme.
     public static int STATE_BUSTER_HAS_GHOST = 1; // Buster transportant un fantôme.
+    public static int STATE_STUN = 2; // Buster assommé.
 
     public static SortedSet<Hunter> myUnits;
     public static Map<Integer, Hunter> myUnitsMap;
@@ -96,49 +99,163 @@ class Player {
             }
 
             majPath();
+            majVisited();
+            majGhost();
 
 
             myUnits.forEach((hunter) -> {
-
-                if (hunter.state == STATE_BUSTER_HAS_GHOST) {
-                    if (hunter.distance(myTeamCase) <= RELEASE_RANGE) {
-                        hunter.release();
-                        ghosts.get(hunter.value).captured = true;
-                    } else {
-                        hunter.move(myTeamCase);
-                    }
-                    return;
+                if (hunter.state == STATE_STUN) {
+                    hunter.move(hunter);
+                    LOG.debug(hunter.entityId + ":stunned");
                 }
-
-                if (hunter.state == STATE_BUSTER_NO_GHOST) {
-                    Optional<Ghosts> ghost = seenGhost.stream()
-                            .filter((g) -> !g.captured && g.huntedBy == null)
-                            .filter((g) -> {
-                                double distance = g.distance(hunter);
-                                return distance <= BUST_MAX && distance >= BUST_MIN;
-                            }).findFirst();
-                    if (ghost.isPresent()) {
-                        Ghosts g = ghost.get();
-                        hunter.bust(g);
-                        g.huntedBy = hunter;
-                        return;
-                    }
-                }
-
-
-                Optional<Case> notvisitedCase = getNotVisited(hunter);
-
-                Case aCase = notvisitedCase.orElseGet(() -> allCase.stream().findAny().get());
-
-                aCase.hasHunter = true;
-                aCase.neighbourg.forEach((c) -> c.hasHunter = true);
-                hunter.move(aCase);
-
-
             });
+            myUnits.stream().filter((hunter -> hunter.action == null))
+                    .forEach((hunter) -> {
+                        if (hunter.state == STATE_BUSTER_HAS_GHOST) {
+                            if (hunter.distance(myTeamCase) <= RELEASE_RANGE) {
+                                hunter.release();
+                                ghosts.get(hunter.value).captured = true;
+                                LOG.debug(hunter.entityId + ": release my ghost");
+                            } else {
+                                hunter.move(myTeamCase);
+                                LOG.debug(hunter.entityId + ": back to home");
+                            }
+                            return;
+                        }
+                    });
+            myUnits.stream().filter((hunter -> hunter.action == null))
+                    .forEach((hunter) -> {
+
+                        Optional<Ghosts> ghost = seenGhost.stream()
+                                .filter((g) -> !g.captured && g.huntedBy == hunter)
+                                .findFirst();
+                        if (ghost.isPresent()) {
+                            Ghosts g = ghost.get();
+                            double distance = g.distance(hunter);
+                            if (distance <= BUST_MAX && distance >= BUST_MIN) {
+                                LOG.debug(hunter.entityId + ": bust my previous unted " + g.entityId);
+                                hunter.bust(g);
+                            } else {
+                                LOG.debug(hunter.entityId + ": move to my previous unted " + g.entityId);
+                                hunter.move(g);
+                            }
+                            return;
+                        }
+                    });
+            myUnits.stream().filter((hunter -> hunter.action == null))
+                    .forEach((hunter) -> {
+
+                        Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
+                                .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
+
+                        Optional<Ghosts> ghost = ghostsNoCapturedNoHunted
+                                .stream()
+                                .filter((g) -> {
+                                    double distance = g.distance(hunter);
+                                    return distance <= BUST_MAX && distance >= BUST_MIN;
+                                }).findFirst();
+                        if (ghost.isPresent()) {
+                            Ghosts g = ghost.get();
+                            LOG.debug(hunter.entityId + ": bust " + g.entityId);
+                            hunter.bust(g);
+                            g.huntedBy = hunter;
+                            return;
+                        }
+                    });
+            myUnits.stream().filter((hunter -> hunter.action == null))
+                    .forEach((hunter) -> {
+                        Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
+                                .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
+                        Optional<Ghosts> ghost = ghostsNoCapturedNoHunted.stream()
+                                .filter((g) -> g.distance(hunter) <= VISION_RANGE)
+                                .findFirst();
+                        if (ghost.isPresent()) {
+                            Ghosts g = ghost.get();
+                            LOG.debug(hunter.entityId + ": move to seen " + g.entityId);
+                            hunter.move(g);
+                            g.huntedBy = hunter;
+                            return;
+                        }
+                    });
+            myUnits.stream().filter((hunter -> hunter.action == null))
+                    .forEach((hunter) -> {
+                        // va vers un fantomes deja localise
+                        Optional<Ghosts> ghost = ghosts.values().stream()
+                                .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
+                                .sorted(Comparator.comparingDouble((g) -> g.casePos.distance(hunter)))
+                                .findFirst();
+
+                        if (ghost.isPresent()) {
+                            Ghosts g = ghost.get();
+                            LOG.debug(hunter.entityId + ": move to previously seen " + g.entityId);
+                            hunter.move(g);
+                            g.huntedBy = hunter;
+                            return;
+                        }
+                    });
+            myUnits.stream().filter((hunter -> hunter.action == null))
+                    .forEach((hunter) -> {
+                        Optional<Case> notvisitedCase = getNotVisited(hunter);
+
+                        Case aCase = notvisitedCase.orElseGet(() -> allCase.stream().findAny().get());
+
+                        aCase.hasHunter = true;
+                        aCase.neighbourg.forEach((c) -> c.hasHunter = true);
+                        LOG.debug(hunter.entityId + ": move to useen " + aCase);
+                        hunter.move(aCase);
+
+
+                    });
+
+            myUnits.forEach((hunter) -> {
+                System.out.println(hunter.action);
+            });
+
         }
     }
 
+    /**
+     * Si un ghost devrait etre dans une zone visible mais qu'il n'y est pas,
+     * on reset sa case car ca veut dire que soit il a bougé, soit il a ete capturer
+     */
+    private static void majGhost() {
+        ghosts.values().forEach((g) -> {
+            if (g.casePos != null && g.casePos.seenThisturn && !seenGhost.contains(g)) {
+                g.casePos = null;
+                g.huntedBy = null;
+            }
+        });
+
+    }
+
+    /**
+     * Mise a jour des case visité afin de savoir ou aller si no ne sait pas ou sont les fantomes.
+     */
+    private static void majVisited() {
+        myUnits.forEach((u) -> {
+            Queue<Case> queues = new ArrayDeque<>();
+            queues.add(u.casePos);
+            Set<Case> allVisited = new HashSet<>();
+            int entityId = u.entityId;
+            while (!queues.isEmpty()) {
+                Case c = queues.poll();
+                allVisited.add(c);
+                c.visited = true;
+                c.seenThisturn = true;
+                c.neighbourg.forEach((n) -> {
+                    Integer nValue = n.valueById.get(entityId);
+                    if (!allVisited.contains(n) && nValue <= NB_CASE_VISION) {
+                        queues.add(n);
+                    }
+                });
+            }
+
+        });
+    }
+
+    /**
+     * Pour chacune de ses unités, on met a jour les chemin des cases.
+     */
     private static void majPath() {
         myUnits.forEach((u) -> {
             Queue<Case> queues = new ArrayDeque<>();
@@ -174,7 +291,6 @@ class Player {
         if (entityType == -1) {
             e = ghosts.get(entityId);
             seenGhost.add((Ghosts) e);
-            ((Ghosts) e).huntedBy = null;
         } else if (myTeamId == entityType) {
             e = myUnitsMap.get(entityId);
             if (e == null) {
@@ -182,8 +298,7 @@ class Player {
                 myUnits.add((Hunter) e);
                 myUnitsMap.put(entityId, (Hunter) e);
             }
-            aCase.visited = true;
-            aCase.neighbourg.forEach((c) -> c.visited = true);
+            ((Hunter) e).action = null;
         } else {
             e = enemyUnit.get(entityId);
             if (e == null) {
@@ -206,6 +321,7 @@ class Player {
         for (int j = 0; j < NB_HEIGTH; j++) {
             for (int i = 0; i < NB_WIDTH; i++) {
                 caseMap[i][j].hasHunter = false;
+                caseMap[i][j].seenThisturn = false;
                 caseMap[i][j].valueById.clear();
             }
         }
@@ -276,6 +392,8 @@ class Ghosts extends Entity {
 }
 
 class Hunter extends Entity {
+    public String action = null;
+
     public Hunter(int id) {
         this.entityId = id;
     }
@@ -285,11 +403,19 @@ class Hunter extends Entity {
     }
 
     public void bust(int idGhost) {
-        System.out.println("BUST " + idGhost);
+        this.action = "BUST " + idGhost;
     }
 
     public void release() {
-        System.out.println("RELEASE");
+        this.action = "RELEASE";
+    }
+
+    public void move(Position pos) {
+        this.move(pos.x, pos.y);
+    }
+
+    public void move(int x, int y) {
+        this.action = "MOVE " + x + " " + y;
     }
 
 
@@ -303,21 +429,6 @@ abstract class Entity extends Position implements Comparable<Entity> {
     public int state; // For busters: 0=idle, 1=carrying a ghost. For ghosts: remaining stamina points.
     public int value; // For busters: Ghost id being carried/busted or number of turns left when stunned. For ghosts: number of busters attempting to trap this ghost.
     public Case casePos;
-
-    private String getMessage() {
-        if (entityRole == 1) {
-            return "DevOups! > Chtazii";
-        }
-        return "";
-    }
-
-    public void move(Position pos) {
-        move(pos.x, pos.y);
-    }
-
-    public void move(int x, int y) {
-        System.out.println("MOVE " + x + " " + y + " " + getMessage());
-    }
 
 
     @Override
@@ -358,6 +469,17 @@ class Case extends Position {
     public boolean hasHunter = false;
     public Collection<Case> neighbourg = new ArrayList<>();
     public Map<Integer, Integer> valueById = new HashMap<>();
+    public boolean seenThisturn = false;
+
+    @Override
+    public String toString() {
+        return "Case{" +
+                "visited=" + visited +
+                ", seenThisturn=" + seenThisturn +
+                ", x=" + x +
+                ", y=" + y +
+                '}';
+    }
 }
 
 
