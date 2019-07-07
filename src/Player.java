@@ -1,5 +1,9 @@
 import java.util.*;
+import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
+
+import static java.util.Comparator.comparingDouble;
+import static java.util.Comparator.comparingInt;
 
 /**
  * Send your busters out into the fog to trap ghosts and bring them home!
@@ -146,7 +150,10 @@ class Player {
                     // va vers un fantomes deja localise
                     Optional<Ghosts> ghost = ghosts.values().stream()
                             .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
-                            .sorted(Comparator.comparingDouble((g) -> g.casePos.distance(hunter)))
+                            .sorted(
+                                    comparingInt((ToIntFunction<Ghosts>)(g) -> g.state)
+                                            .thenComparingDouble((g) -> g.casePos.distance(hunter))
+                            )
                             .findFirst();
 
                     if (ghost.isPresent()) {
@@ -166,6 +173,7 @@ class Player {
                             .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
                     Optional<Ghosts> ghost = ghostsNoCapturedNoHunted.stream()
                             .filter((g) -> g.distance(hunter) <= VISION_RANGE)
+                            .sorted(comparingInt((g) -> g.state))
                             .findFirst();
                     if (ghost.isPresent()) {
                         Ghosts g = ghost.get();
@@ -189,7 +197,9 @@ class Player {
                             .filter((g) -> {
                                 double distance = g.distance(hunter);
                                 return distance <= BUST_MAX && distance >= BUST_MIN;
-                            }).findFirst();
+                            })
+                            .sorted(comparingInt((g) -> g.state))
+                            .findFirst();
                     if (ghost.isPresent()) {
                         Ghosts g = ghost.get();
                         LOG.debug(hunter.entityId + ": bust " + g.entityId);
@@ -314,7 +324,7 @@ class Player {
     private static Optional<Case> getNotVisited(Hunter hunter) {
         return allCase.stream()
                 .filter((c) -> !c.visited && !c.hasHunter)
-                .sorted(Comparator.comparingInt((c) -> c.valueById.get(hunter.entityId)))
+                .sorted(comparingInt((c) -> c.valueById.get(hunter.entityId)))
                 .findFirst();
     }
 
