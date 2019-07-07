@@ -34,6 +34,7 @@ class Player {
     public static int STATE_BUSTER_NO_GHOST = 0; // Buster ne transportant pas de fantôme.
     public static int STATE_BUSTER_HAS_GHOST = 1; // Buster transportant un fantôme.
     public static int STATE_STUN = 2; // Buster assommé.
+    public static int STATE_TARGET_GHOST = 3; // Buster assommé.
 
     public static SortedSet<Hunter> myUnits;
     public static Map<Integer, Hunter> myUnitsMap;
@@ -64,20 +65,8 @@ class Player {
         ghosts = new HashMap<>();
 
         initCases();
-
-        myTeamCase = new Case();
-        if (myTeamId == 0) {
-            myTeamCase.x = 0;
-            myTeamCase.y = 0;
-        } else {
-            myTeamCase.x = MAX_WIDTH;
-            myTeamCase.y = MAX_HEIGTH;
-        }
-
-
-        for (int i = 0; i < ghostCount; i++) {
-            ghosts.put(i, new Ghosts(i));
-        }
+        initMyTeamCase(myTeamId);
+        initGhost(ghostCount);
 
         // game loop
         while (true) {
@@ -102,116 +91,161 @@ class Player {
             majVisited();
             majGhost();
 
-
-            myUnits.forEach((hunter) -> {
-                if (hunter.state == STATE_STUN) {
-                    hunter.move(hunter);
-                    LOG.debug(hunter.entityId + ":stunned");
-                }
-            });
-            myUnits.stream().filter((hunter -> hunter.action == null))
-                    .forEach((hunter) -> {
-                        if (hunter.state == STATE_BUSTER_HAS_GHOST) {
-                            if (hunter.distance(myTeamCase) <= RELEASE_RANGE) {
-                                hunter.release();
-                                ghosts.get(hunter.value).captured = true;
-                                LOG.debug(hunter.entityId + ": release my ghost");
-                            } else {
-                                hunter.move(myTeamCase);
-                                LOG.debug(hunter.entityId + ": back to home");
-                            }
-                            return;
-                        }
-                    });
-            myUnits.stream().filter((hunter -> hunter.action == null))
-                    .forEach((hunter) -> {
-
-                        Optional<Ghosts> ghost = seenGhost.stream()
-                                .filter((g) -> !g.captured && g.huntedBy == hunter)
-                                .findFirst();
-                        if (ghost.isPresent()) {
-                            Ghosts g = ghost.get();
-                            double distance = g.distance(hunter);
-                            if (distance <= BUST_MAX && distance >= BUST_MIN) {
-                                LOG.debug(hunter.entityId + ": bust my previous unted " + g.entityId);
-                                hunter.bust(g);
-                            } else {
-                                LOG.debug(hunter.entityId + ": move to my previous unted " + g.entityId);
-                                hunter.move(g);
-                            }
-                            return;
-                        }
-                    });
-            myUnits.stream().filter((hunter -> hunter.action == null))
-                    .forEach((hunter) -> {
-
-                        Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
-                                .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
-
-                        Optional<Ghosts> ghost = ghostsNoCapturedNoHunted
-                                .stream()
-                                .filter((g) -> {
-                                    double distance = g.distance(hunter);
-                                    return distance <= BUST_MAX && distance >= BUST_MIN;
-                                }).findFirst();
-                        if (ghost.isPresent()) {
-                            Ghosts g = ghost.get();
-                            LOG.debug(hunter.entityId + ": bust " + g.entityId);
-                            hunter.bust(g);
-                            g.huntedBy = hunter;
-                            return;
-                        }
-                    });
-            myUnits.stream().filter((hunter -> hunter.action == null))
-                    .forEach((hunter) -> {
-                        Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
-                                .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
-                        Optional<Ghosts> ghost = ghostsNoCapturedNoHunted.stream()
-                                .filter((g) -> g.distance(hunter) <= VISION_RANGE)
-                                .findFirst();
-                        if (ghost.isPresent()) {
-                            Ghosts g = ghost.get();
-                            LOG.debug(hunter.entityId + ": move to seen " + g.entityId);
-                            hunter.move(g);
-                            g.huntedBy = hunter;
-                            return;
-                        }
-                    });
-            myUnits.stream().filter((hunter -> hunter.action == null))
-                    .forEach((hunter) -> {
-                        // va vers un fantomes deja localise
-                        Optional<Ghosts> ghost = ghosts.values().stream()
-                                .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
-                                .sorted(Comparator.comparingDouble((g) -> g.casePos.distance(hunter)))
-                                .findFirst();
-
-                        if (ghost.isPresent()) {
-                            Ghosts g = ghost.get();
-                            LOG.debug(hunter.entityId + ": move to previously seen " + g.entityId);
-                            hunter.move(g);
-                            g.huntedBy = hunter;
-                            return;
-                        }
-                    });
-            myUnits.stream().filter((hunter -> hunter.action == null))
-                    .forEach((hunter) -> {
-                        Optional<Case> notvisitedCase = getNotVisited(hunter);
-
-                        Case aCase = notvisitedCase.orElseGet(() -> allCase.stream().findAny().get());
-
-                        aCase.hasHunter = true;
-                        aCase.neighbourg.forEach((c) -> c.hasHunter = true);
-                        LOG.debug(hunter.entityId + ": move to useen " + aCase);
-                        hunter.move(aCase);
-
-
-                    });
+            //recherche des actions
+            actionStunned();
+            actionHasGhost();
+            actionAlreadyTarget();
+            actionBust();
+            actionMoveToGhostSeen();
+            actionMoveToPreviousSeen();
+            actyionMoveToUnseeMap();
 
             myUnits.forEach((hunter) -> {
                 System.out.println(hunter.action);
             });
 
         }
+    }
+
+    private static void initGhost(int ghostCount) {
+        for (int i = 0; i < ghostCount; i++) {
+            ghosts.put(i, new Ghosts(i));
+        }
+    }
+
+    private static void initMyTeamCase(int myTeamId) {
+        myTeamCase = new Case();
+        if (myTeamId == 0) {
+            myTeamCase.x = 0;
+            myTeamCase.y = 0;
+        } else {
+            myTeamCase.x = MAX_WIDTH;
+            myTeamCase.y = MAX_HEIGTH;
+        }
+    }
+
+    private static void actyionMoveToUnseeMap() {
+        myUnits.stream().filter((hunter -> hunter.action == null))
+                .forEach((hunter) -> {
+                    Optional<Case> notvisitedCase = getNotVisited(hunter);
+
+                    Case aCase = notvisitedCase.orElseGet(() -> allCase.stream().findAny().get());
+
+                    aCase.hasHunter = true;
+                    aCase.neighbourg.forEach((c) -> c.hasHunter = true);
+                    LOG.debug(hunter.entityId + ": move to useen " + aCase);
+                    hunter.move(aCase);
+
+
+                });
+    }
+
+    private static void actionMoveToPreviousSeen() {
+        myUnits.stream().filter((hunter -> hunter.action == null))
+                .forEach((hunter) -> {
+                    // va vers un fantomes deja localise
+                    Optional<Ghosts> ghost = ghosts.values().stream()
+                            .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
+                            .sorted(Comparator.comparingDouble((g) -> g.casePos.distance(hunter)))
+                            .findFirst();
+
+                    if (ghost.isPresent()) {
+                        Ghosts g = ghost.get();
+                        LOG.debug(hunter.entityId + ": move to previously seen " + g.entityId);
+                        hunter.move(g);
+                        g.huntedBy = hunter;
+                        return;
+                    }
+                });
+    }
+
+    private static void actionMoveToGhostSeen() {
+        myUnits.stream().filter((hunter -> hunter.action == null))
+                .forEach((hunter) -> {
+                    Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
+                            .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
+                    Optional<Ghosts> ghost = ghostsNoCapturedNoHunted.stream()
+                            .filter((g) -> g.distance(hunter) <= VISION_RANGE)
+                            .findFirst();
+                    if (ghost.isPresent()) {
+                        Ghosts g = ghost.get();
+                        LOG.debug(hunter.entityId + ": move to seen " + g.entityId);
+                        hunter.move(g);
+                        g.huntedBy = hunter;
+                        return;
+                    }
+                });
+    }
+
+    private static void actionBust() {
+        myUnits.stream().filter((hunter -> hunter.action == null))
+                .forEach((hunter) -> {
+
+                    Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
+                            .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
+
+                    Optional<Ghosts> ghost = ghostsNoCapturedNoHunted
+                            .stream()
+                            .filter((g) -> {
+                                double distance = g.distance(hunter);
+                                return distance <= BUST_MAX && distance >= BUST_MIN;
+                            }).findFirst();
+                    if (ghost.isPresent()) {
+                        Ghosts g = ghost.get();
+                        LOG.debug(hunter.entityId + ": bust " + g.entityId);
+                        hunter.bust(g);
+                        g.huntedBy = hunter;
+                        return;
+                    }
+                });
+    }
+
+    private static void actionAlreadyTarget() {
+        myUnits.stream().filter((hunter -> hunter.action == null))
+                .forEach((hunter) -> {
+
+                    Optional<Ghosts> ghost = seenGhost.stream()
+                            .filter((g) -> !g.captured && g.huntedBy == hunter)
+                            .findFirst();
+                    if (ghost.isPresent()) {
+                        Ghosts g = ghost.get();
+                        double distance = g.distance(hunter);
+                        if (distance <= BUST_MAX && distance >= BUST_MIN) {
+                            LOG.debug(hunter.entityId + ": bust my previous unted " + g.entityId);
+                            hunter.bust(g);
+                        } else {
+                            LOG.debug(hunter.entityId + ": move to my previous unted " + g.entityId);
+                            hunter.move(g);
+                        }
+                        return;
+                    }
+                });
+    }
+
+    private static void actionHasGhost() {
+        myUnits.stream().filter((hunter -> hunter.action == null))
+                .forEach((hunter) -> {
+                    if (hunter.state == STATE_BUSTER_HAS_GHOST) {
+                        if (hunter.distance(myTeamCase) <= RELEASE_RANGE) {
+                            hunter.release();
+                            ghosts.get(hunter.value).captured = true;
+                            LOG.debug(hunter.entityId + ": release my ghost");
+                        } else {
+                            hunter.move(myTeamCase);
+                            LOG.debug(hunter.entityId + ": back to home");
+                        }
+                        return;
+                    }
+                });
+    }
+
+    private static void actionStunned() {
+        myUnits.forEach((hunter) -> {
+            if (hunter.state == STATE_STUN) {
+                hunter.move(hunter);
+                LOG.debug(hunter.entityId + ":stunned");
+            }
+        });
     }
 
     /**
