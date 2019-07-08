@@ -1,8 +1,13 @@
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
 
-import static java.util.Comparator.comparingDouble;
 import static java.util.Comparator.comparingInt;
 
 /**
@@ -54,6 +59,9 @@ class Player {
     public static Collection<Case> allCase = new ArrayList<>(NB_WIDTH * NB_HEIGTH);
     public static Case myTeamCase;
 
+    private static ExecutorService EXECUTORS;
+
+
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
         int bustersPerPlayer = in.nextInt(); // the amount of busters you control
@@ -67,6 +75,8 @@ class Player {
         enemyUnit = new HashMap<>();
 
         ghosts = new HashMap<>();
+
+        EXECUTORS = Executors.newFixedThreadPool(bustersPerPlayer);
 
         initCases();
         initMyTeamCase(myTeamId);
@@ -91,7 +101,7 @@ class Player {
                 majEntity(myTeamId, entityId, x, y, entityType, state, value);
             }
 
-            majPath();
+            majPath(bustersPerPlayer);
             majVisited();
             majGhost();
 
@@ -151,7 +161,7 @@ class Player {
                     Optional<Ghosts> ghost = ghosts.values().stream()
                             .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
                             .sorted(
-                                    comparingInt((ToIntFunction<Ghosts>)(g) -> g.state)
+                                    comparingInt((ToIntFunction<Ghosts>) (g) -> g.state)
                                             .thenComparingDouble((g) -> g.casePos.distance(hunter))
                             )
                             .findFirst();
@@ -300,25 +310,24 @@ class Player {
     /**
      * Pour chacune de ses unités, on met a jour les chemin des cases.
      */
-    private static void majPath() {
+    private static void majPath(int bustersPerPlayer) {
+        CountDownLatch latch = new CountDownLatch(bustersPerPlayer);
         myUnits.forEach((u) -> {
-            Queue<Case> queues = new ArrayDeque<>();
-            queues.add(u.casePos);
             int entityId = u.entityId;
             u.casePos.valueById.put(entityId, 0);
+            EXECUTORS.submit(new PathCalculator<>(
+                    u.casePos,
+                    (c) -> c.valueById.getOrDefault(entityId, Integer.MAX_VALUE),
+                    (c,v) -> c.valueById.put(entityId,v),
+                    latch));
 
-            while (!queues.isEmpty()) {
-                Case c = queues.poll();
-                Integer cValue = c.valueById.get(entityId);
-                c.neighbourg.forEach((n) -> {
-                    Integer value = n.valueById.getOrDefault(entityId, Integer.MAX_VALUE);
-                    if (value > cValue + 1) {
-                        n.valueById.put(entityId, cValue + 1);
-                        queues.add(n);
-                    }
-                });
-            }
         });
+        //wait all patch calculated
+        try {
+            latch.await(50, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            System.err.println("InterruptedException " + e);
+        }
     }
 
     private static Optional<Case> getNotVisited(Hunter hunter) {
@@ -508,7 +517,7 @@ abstract class Entity extends Position implements Comparable<Entity> {
     }
 }
 
-class Case extends Position {
+class Case extends Position implements PathExplorer<Case> {
     public boolean visited = false;
     public boolean hasHunter = false;
     public Collection<Case> neighbourg = new ArrayList<>();
@@ -523,6 +532,52 @@ class Case extends Position {
                 ", x=" + x +
                 ", y=" + y +
                 '}';
+    }
+
+    @Override
+    public Collection<Case> getNeighbourg() {
+        return neighbourg;
+    }
+}
+
+class PathCalculator<T extends PathExplorer<T>> implements Runnable {
+
+
+    private final Queue<T> queue;
+    private final Function<T, Integer> getValue;
+    private final BiConsumer<T, Integer> setValue;
+    private final CountDownLatch latch;
+
+    PathCalculator(final T starting, Function<T, Integer> getValue, BiConsumer<T, Integer> setValue, CountDownLatch latch) {
+        queue = new ArrayDeque<>();
+        queue.add(starting);
+        this.getValue = getValue;
+        this.setValue = setValue;
+        setValue.accept(starting, 0);
+        this.latch = latch;
+    }
+
+    @Override
+    public void run() {
+        while (!queue.isEmpty()) {
+
+            T current = queue.poll();
+            Integer currentValuePlusOne = getValue.apply(current) + 1;
+            current.getNeighbourg().forEach((n) -> {
+                calculateNeighbourg(current, currentValuePlusOne, n);
+            });
+        }
+        latch.countDown();
+    }
+
+    private void calculateNeighbourg(T current, Integer currentValuePlusOne, T neighbourg) {
+        if (neighbourg != null) {
+            Integer neighbourgValue = getValue.apply(neighbourg);
+            if (neighbourgValue > currentValuePlusOne) {
+                setValue.accept(neighbourg, currentValuePlusOne);
+                queue.add(neighbourg);
+            }
+        }
     }
 }
 
@@ -543,6 +598,12 @@ abstract class Position {
     }
 
 }
+
+
+interface PathExplorer<T> {
+    Collection<T> getNeighbourg();
+}
+
 
 class LOG {
 
@@ -566,3 +627,5 @@ class LOG {
         System.err.print(c);
     }
 }
+
+
