@@ -33,7 +33,7 @@ class Player {
     private static final int RELEASE_RANGE = 1600;
     public static int BUST_MAX = 1760;
     public static int BUST_MIN = 900;
-    public static int STUN_RANGE  = 1760 ;
+    public static int STUN_RANGE = 1760;
 
     public static int TEAM_0_X = 0;
     public static int TEAM_0_Y = 0;
@@ -64,7 +64,7 @@ class Player {
 
     private static ExecutorService EXECUTORS;
 
-    private static int turn = 0;
+    public static int turn = 0;
 
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
@@ -252,7 +252,7 @@ class Player {
                             ghosts.get(hunter.value).captured = true;
                             LOG.debug(hunter.entityId + ": release my ghost");
                         } else {
-                                //strun defensif
+                            //strun defensif
                             Optional<Hunter> stunableEnemy = seenEnnemy.stream()
                                     .filter((e) -> e.state != STATE_STUN && e.distance(hunter) < STUN_RANGE)
                                     .findFirst();
@@ -482,8 +482,9 @@ class Hunter extends Entity {
     }
 
     public void stun(Hunter enemy) {
-            System.out.println("STUN " + enemy.entityId);
-        }
+        this.action = "STUN " + enemy.entityId;
+        this.lastStunTurned = Player.turn;
+    }
 
 }
 
