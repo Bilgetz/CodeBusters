@@ -44,7 +44,7 @@ class Player {
     public static int STATE_BUSTER_NO_GHOST = 0; // Buster ne transportant pas de fantôme.
     public static int STATE_BUSTER_HAS_GHOST = 1; // Buster transportant un fantôme.
     public static int STATE_STUN = 2; // Buster assommé.
-    public static int STATE_TARGET_GHOST = 3; // Buster assommé.
+    public static int STATE_TARGET_GHOST = 3; // Buster visant un fantome.
 
     public static SortedSet<Hunter> myUnits;
     public static Map<Integer, Hunter> myUnitsMap;
@@ -112,6 +112,7 @@ class Player {
             //recherche des actions
             actionStunned();
             actionHasGhost();
+            actionStunEnemyWithGhost();
             actionAlreadyTarget();
             actionBust();
             actionMoveToGhostSeen();
@@ -125,6 +126,7 @@ class Player {
             turn++;
         }
     }
+
 
     private static void initGhost(int ghostCount) {
         for (int i = 0; i < ghostCount; i++) {
@@ -142,6 +144,66 @@ class Player {
             myTeamCase.y = MAX_HEIGTH;
         }
     }
+
+    private static void actionStunEnemyWithGhost() {
+        if (seenEnnemy.isEmpty()) {
+            return;
+        }
+
+        if (seenEnnemy.stream().allMatch((e) -> e.state == STATE_STUN)) {
+            return;
+        }
+
+        myUnits.stream()
+                .filter((hunter -> hunter.action == null && hunter.lastStunTurned + 20 < turn))
+                .forEach((hunter) -> {
+                    Optional<Hunter> stunableEnemy = seenEnnemy.stream()
+                            .filter((e) -> e.state == STATE_BUSTER_HAS_GHOST && e.distance(hunter) < STUN_RANGE)
+                            .findFirst();
+                    stunableEnemy.ifPresent((e) -> {
+                        hunter.stun(e);
+                    });
+                });
+    }
+
+    private static void actionStunEnemyNearLowGhostHp() {
+        if (seenEnnemy.isEmpty() || seenGhost.isEmpty()) {
+            return;
+        }
+
+        List<Hunter> noStunnedEnnemy = seenEnnemy.stream().filter((e) -> e.state == STATE_STUN).collect(Collectors.toList());
+        if (noStunnedEnnemy.isEmpty()) {
+            return;
+        }
+        List<Ghosts> lowHpGhost = seenGhost.stream().filter((g) -> g.state < 10).collect(Collectors.toList());
+
+        if(lowHpGhost.isEmpty()) {
+            return;
+        }
+
+        Set<Hunter> enemyToStun = lowHpGhost.stream()
+                .flatMap((g) -> noStunnedEnnemy.stream()
+                        .filter((e) -> g.distance(e) < BUST_MAX)
+                ).collect(Collectors.toSet());
+
+        if(enemyToStun.isEmpty()) {
+            return;
+        }
+
+        myUnits.stream()
+                .filter((hunter -> hunter.action == null && hunter.lastStunTurned + 20 < turn))
+                .forEach((hunter) -> {
+                    Optional<Hunter> stunableEnemy = enemyToStun.stream()
+                            .filter((e) -> e.distance(hunter) < STUN_RANGE)
+                            .findFirst();
+                    stunableEnemy.ifPresent((e) -> {
+                        hunter.stun(e);
+                    });
+                });
+
+
+    }
+
 
     private static void actyionMoveToUnseeMap() {
         myUnits.stream().filter((hunter -> hunter.action == null))
@@ -618,6 +680,16 @@ interface PathExplorer<T> {
     Collection<T> getNeighbourg();
 }
 
+
+class Pair <T,U> {
+    public T first;
+    public U second;
+
+    public Pair(T first, U second) {
+        this.first = first;
+        this.second = second;
+    }
+}
 
 class LOG {
 
