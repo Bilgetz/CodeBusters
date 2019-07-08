@@ -33,6 +33,7 @@ class Player {
     private static final int RELEASE_RANGE = 1600;
     public static int BUST_MAX = 1760;
     public static int BUST_MIN = 900;
+    public static int STUN_RANGE  = 1760 ;
 
     public static int TEAM_0_X = 0;
     public static int TEAM_0_Y = 0;
@@ -50,6 +51,8 @@ class Player {
 
     public static SortedSet<Hunter> enemyList;
     public static Map<Integer, Hunter> enemyUnit;
+    public static Collection<Hunter> seenEnnemy = new ArrayList<>();
+
 
     public static Map<Integer, Ghosts> ghosts;
 
@@ -61,6 +64,7 @@ class Player {
 
     private static ExecutorService EXECUTORS;
 
+    private static int turn = 0;
 
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
@@ -87,7 +91,7 @@ class Player {
 
             resetCase();
             seenGhost.clear();
-
+            seenEnnemy.clear();
 
             int entities = in.nextInt(); // the number of busters and ghosts visible to you
             for (int i = 0; i < entities; i++) {
@@ -118,6 +122,7 @@ class Player {
                 System.out.println(hunter.action);
             });
 
+            turn++;
         }
     }
 
@@ -171,7 +176,6 @@ class Player {
                         LOG.debug(hunter.entityId + ": move to previously seen " + g.entityId);
                         hunter.move(g);
                         g.huntedBy = hunter;
-                        return;
                     }
                 });
     }
@@ -190,7 +194,6 @@ class Player {
                         LOG.debug(hunter.entityId + ": move to seen " + g.entityId);
                         hunter.move(g);
                         g.huntedBy = hunter;
-                        return;
                     }
                 });
     }
@@ -215,7 +218,6 @@ class Player {
                         LOG.debug(hunter.entityId + ": bust " + g.entityId);
                         hunter.bust(g);
                         g.huntedBy = hunter;
-                        return;
                     }
                 });
     }
@@ -237,7 +239,6 @@ class Player {
                             LOG.debug(hunter.entityId + ": move to my previous unted " + g.entityId);
                             hunter.move(g);
                         }
-                        return;
                     }
                 });
     }
@@ -251,10 +252,17 @@ class Player {
                             ghosts.get(hunter.value).captured = true;
                             LOG.debug(hunter.entityId + ": release my ghost");
                         } else {
-                            hunter.move(myTeamCase);
-                            LOG.debug(hunter.entityId + ": back to home");
+                                //strun defensif
+                            Optional<Hunter> stunableEnemy = seenEnnemy.stream()
+                                    .filter((e) -> e.state != STATE_STUN && e.distance(hunter) < STUN_RANGE)
+                                    .findFirst();
+                            if (hunter.lastStunTurned + 20 < turn && stunableEnemy.isPresent()) {
+                                hunter.stun(stunableEnemy.get());
+                            } else {
+                                hunter.move(myTeamCase);
+                                LOG.debug(hunter.entityId + ": back to home");
+                            }
                         }
-                        return;
                     }
                 });
     }
@@ -318,7 +326,7 @@ class Player {
             EXECUTORS.submit(new PathCalculator<>(
                     u.casePos,
                     (c) -> c.valueById.getOrDefault(entityId, Integer.MAX_VALUE),
-                    (c,v) -> c.valueById.put(entityId,v),
+                    (c, v) -> c.valueById.put(entityId, v),
                     latch));
 
         });
@@ -359,6 +367,7 @@ class Player {
                 enemyList.add((Hunter) e);
                 enemyUnit.put(entityId, (Hunter) e);
             }
+            seenEnnemy.add((Hunter) e);
         }
         //LOG.debug(e);
 //        if (!(e instanceof Ghosts) || e.casePos == null) {
@@ -446,6 +455,7 @@ class Ghosts extends Entity {
 
 class Hunter extends Entity {
     public String action = null;
+    public int lastStunTurned = 0;
 
     public Hunter(int id) {
         this.entityId = id;
@@ -471,6 +481,9 @@ class Hunter extends Entity {
         this.action = "MOVE " + x + " " + y;
     }
 
+    public void stun(Hunter enemy) {
+            System.out.println("STUN " + enemy.entityId);
+        }
 
 }
 
