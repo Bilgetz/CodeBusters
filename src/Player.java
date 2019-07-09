@@ -19,7 +19,7 @@ class Player {
     public static int MAX_WIDTH = 16000;
     public static int MAX_HEIGTH = 9000;
 
-    private static final int VISION_RANGE = 2200; //real range
+    public static final int VISION_RANGE = 2200; //real range
 
     public static final int MOVE_RANGE = 800;
 
@@ -31,7 +31,7 @@ class Player {
     public static final int NB_WIDTH = MAX_WIDTH / CASE_SIZE;
 
 
-    private static final int RELEASE_RANGE = 1600;
+    public static final int RELEASE_RANGE = 1600;
     public static int BUST_MAX = 1760;
     public static int BUST_MIN = 900;
     public static int STUN_RANGE = 1760;
@@ -47,21 +47,34 @@ class Player {
     public static int STATE_STUN = 2; // Buster assommé.
     public static int STATE_TARGET_GHOST = 3; // Buster visant un fantome.
 
-    public static SortedSet<Hunter> myUnits;
-    public static Map<Integer, Hunter> myUnitsMap;
+    public static SortedSet<Hunter> myUnits = new TreeSet<>();
+    public static Map<Integer, Hunter> myUnitsMap = new HashMap<>();
 
-    public static SortedSet<Hunter> enemyList;
-    public static Map<Integer, Hunter> enemyUnit;
+    public static SortedSet<Hunter> enemyList = new TreeSet<>();
+    public static Map<Integer, Hunter> enemyUnit = new HashMap<>();
     public static Collection<Hunter> seenEnnemy = new ArrayList<>();
 
 
-    public static Map<Integer, Ghosts> ghosts;
+    public static Map<Integer, Ghosts> ghosts = new HashMap<>();
 
     public static Collection<Ghosts> seenGhost = new ArrayList<>();
 
     public static Case[][] caseMap = new Case[NB_WIDTH][NB_HEIGTH];
     public static Collection<Case> allCase = new ArrayList<>(NB_WIDTH * NB_HEIGTH);
     public static Case myTeamCase;
+
+
+    private static Strategie<Hunter> strategies[] = asArray(
+            new HasStunStrategie(),
+            new HasGhostStrategy(),
+            new StunEnemyWithGhostStrategy(),
+            new AlreadyTargetStrategie(),
+            new BustStrategie(),
+            new MoveToGhostSeenStrategie(),
+            new MoveToPreviousSeenStrategie(),
+            new MoveToUnseeMapStrategie()
+    );
+
 
     private static ExecutorService EXECUTORS;
 
@@ -73,21 +86,13 @@ class Player {
         int ghostCount = in.nextInt(); // the amount of ghosts on the map
         int myTeamId = in.nextInt(); // if this is 0, your base is on the top left of the map, if it is one, on the bottom right
 
-        myUnits = new TreeSet<>();
-        enemyList = new TreeSet<>();
-
-        myUnitsMap = new HashMap<>();
-        enemyUnit = new HashMap<>();
-
-        ghosts = new HashMap<>();
-
         EXECUTORS = Executors.newFixedThreadPool(bustersPerPlayer);
 
         initCases();
         initMyTeamCase(myTeamId);
         initGhost(ghostCount);
 
-        Strategie<Hunter> strategies[] = asArray(new StunEnemyWithGhostStrategy());
+
 
         // game loop
         while (true) {
@@ -113,25 +118,16 @@ class Player {
             majGhost();
 
             int i = 0;
-
-
-
-            //recherche des actions
-            actionStunned();
-            actionHasGhost();
-//            actionStunEnemyWithGhost();
             while (i < strategies.length) {
                 Strategie<Hunter> strategy = strategies[i];
-                if(strategy.runThisStrategie()) {
-                    myUnits.stream().filter((hunter -> hunter.action == null))
+                if (strategy.runThisStrategie()) {
+                    myUnits.stream()
+                            .filter((hunter -> hunter.action == null))
+                            .filter(strategy::filter)
                             .forEach(strategy::accept);
                 }
+                i++;
             }
-            actionAlreadyTarget();
-            actionBust();
-            actionMoveToGhostSeen();
-            actionMoveToPreviousSeen();
-            actyionMoveToUnseeMap();
 
             myUnits.forEach((hunter) -> {
                 System.out.println(hunter.action);
@@ -163,198 +159,6 @@ class Player {
         }
     }
 
-    private static void actionStunEnemyWithGhost() {
-        if (seenEnnemy.isEmpty()) {
-            return;
-        }
-
-        if (seenEnnemy.stream().allMatch((e) -> e.state == STATE_STUN)) {
-            return;
-        }
-
-        myUnits.stream()
-                .filter((hunter -> hunter.action == null && hunter.lastStunTurned + 20 < turn))
-                .forEach((hunter) -> {
-                    Optional<Hunter> stunableEnemy = seenEnnemy.stream()
-                            .filter((e) -> e.state == STATE_BUSTER_HAS_GHOST && e.distance(hunter) < STUN_RANGE)
-                            .findFirst();
-                    stunableEnemy.ifPresent((e) -> {
-                        hunter.stun(e);
-                    });
-                });
-    }
-
-    private static void actionStunEnemyNearLowGhostHp() {
-        if (seenEnnemy.isEmpty() || seenGhost.isEmpty()) {
-            return;
-        }
-
-        List<Hunter> noStunnedEnnemy = seenEnnemy.stream().filter((e) -> e.state == STATE_STUN).collect(Collectors.toList());
-        if (noStunnedEnnemy.isEmpty()) {
-            return;
-        }
-        List<Ghosts> lowHpGhost = seenGhost.stream().filter((g) -> g.state < 10).collect(Collectors.toList());
-
-        if (lowHpGhost.isEmpty()) {
-            return;
-        }
-
-        Set<Hunter> enemyToStun = lowHpGhost.stream()
-                .flatMap((g) -> noStunnedEnnemy.stream()
-                        .filter((e) -> g.distance(e) < BUST_MAX)
-                ).collect(Collectors.toSet());
-
-        if (enemyToStun.isEmpty()) {
-            return;
-        }
-
-        myUnits.stream()
-                .filter((hunter -> hunter.action == null && hunter.lastStunTurned + 20 < turn))
-                .forEach((hunter) -> {
-                    Optional<Hunter> stunableEnemy = enemyToStun.stream()
-                            .filter((e) -> e.distance(hunter) < STUN_RANGE)
-                            .findFirst();
-                    stunableEnemy.ifPresent((e) -> {
-                        hunter.stun(e);
-                    });
-                });
-
-
-    }
-
-
-    private static void actyionMoveToUnseeMap() {
-        myUnits.stream().filter((hunter -> hunter.action == null))
-                .forEach((hunter) -> {
-                    Optional<Case> notvisitedCase = getNotVisited(hunter);
-
-                    Case aCase = notvisitedCase.orElseGet(() -> allCase.stream().findAny().get());
-
-                    aCase.hasHunter = true;
-                    aCase.neighbourg.forEach((c) -> c.hasHunter = true);
-                    LOG.debug(hunter.entityId + ": move to useen " + aCase);
-                    hunter.move(aCase);
-
-
-                });
-    }
-
-    private static void actionMoveToPreviousSeen() {
-        myUnits.stream().filter((hunter -> hunter.action == null))
-                .forEach((hunter) -> {
-                    // va vers un fantomes deja localise
-                    Optional<Ghosts> ghost = ghosts.values().stream()
-                            .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
-                            .sorted(
-                                    comparingInt((ToIntFunction<Ghosts>) (g) -> g.state)
-                                            .thenComparingDouble((g) -> g.casePos.distance(hunter))
-                            )
-                            .findFirst();
-
-                    if (ghost.isPresent()) {
-                        Ghosts g = ghost.get();
-                        LOG.debug(hunter.entityId + ": move to previously seen " + g.entityId);
-                        hunter.move(g);
-                        g.huntedBy = hunter;
-                    }
-                });
-    }
-
-    private static void actionMoveToGhostSeen() {
-        myUnits.stream().filter((hunter -> hunter.action == null))
-                .forEach((hunter) -> {
-                    Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
-                            .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
-                    Optional<Ghosts> ghost = ghostsNoCapturedNoHunted.stream()
-                            .filter((g) -> g.distance(hunter) <= VISION_RANGE)
-                            .sorted(comparingInt((g) -> g.state))
-                            .findFirst();
-                    if (ghost.isPresent()) {
-                        Ghosts g = ghost.get();
-                        LOG.debug(hunter.entityId + ": move to seen " + g.entityId);
-                        hunter.move(g);
-                        g.huntedBy = hunter;
-                    }
-                });
-    }
-
-    private static void actionBust() {
-        myUnits.stream().filter((hunter -> hunter.action == null))
-                .forEach((hunter) -> {
-
-                    Set<Ghosts> ghostsNoCapturedNoHunted = seenGhost.stream()
-                            .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
-
-                    Optional<Ghosts> ghost = ghostsNoCapturedNoHunted
-                            .stream()
-                            .filter((g) -> {
-                                double distance = g.distance(hunter);
-                                return distance <= BUST_MAX && distance >= BUST_MIN;
-                            })
-                            .sorted(comparingInt((g) -> g.state))
-                            .findFirst();
-                    if (ghost.isPresent()) {
-                        Ghosts g = ghost.get();
-                        LOG.debug(hunter.entityId + ": bust " + g.entityId);
-                        hunter.bust(g);
-                        g.huntedBy = hunter;
-                    }
-                });
-    }
-
-    private static void actionAlreadyTarget() {
-        myUnits.stream().filter((hunter -> hunter.action == null))
-                .forEach((hunter) -> {
-
-                    Optional<Ghosts> ghost = seenGhost.stream()
-                            .filter((g) -> !g.captured && g.huntedBy == hunter)
-                            .findFirst();
-                    if (ghost.isPresent()) {
-                        Ghosts g = ghost.get();
-                        double distance = g.distance(hunter);
-                        if (distance <= BUST_MAX && distance >= BUST_MIN) {
-                            LOG.debug(hunter.entityId + ": bust my previous unted " + g.entityId);
-                            hunter.bust(g);
-                        } else {
-                            LOG.debug(hunter.entityId + ": move to my previous unted " + g.entityId);
-                            hunter.move(g);
-                        }
-                    }
-                });
-    }
-
-    private static void actionHasGhost() {
-        myUnits.stream().filter((hunter -> hunter.action == null))
-                .forEach((hunter) -> {
-                    if (hunter.state == STATE_BUSTER_HAS_GHOST) {
-                        if (hunter.distance(myTeamCase) <= RELEASE_RANGE) {
-                            hunter.release();
-                            ghosts.get(hunter.value).captured = true;
-                            LOG.debug(hunter.entityId + ": release my ghost");
-                        } else {
-                            //strun defensif
-                            Optional<Hunter> stunableEnemy = seenEnnemy.stream()
-                                    .filter((e) -> e.state != STATE_STUN && e.distance(hunter) < STUN_RANGE)
-                                    .findFirst();
-                            if (hunter.lastStunTurned + 20 < turn && stunableEnemy.isPresent()) {
-                                hunter.stun(stunableEnemy.get());
-                            } else {
-                                hunter.move(myTeamCase);
-                                LOG.debug(hunter.entityId + ": back to home");
-                            }
-                        }
-                    }
-                });
-    }
-
-    private static void actionStunned() {
-        myUnits.forEach((hunter) -> {
-            if (hunter.state == STATE_STUN) {
-                hunter.move(hunter);
-                LOG.debug(hunter.entityId + ":stunned");
-            }
-        });
-    }
 
     /**
      * Si un ghost devrait etre dans une zone visible mais qu'il n'y est pas,
@@ -416,13 +220,6 @@ class Player {
         } catch (InterruptedException e) {
             System.err.println("InterruptedException " + e);
         }
-    }
-
-    private static Optional<Case> getNotVisited(Hunter hunter) {
-        return allCase.stream()
-                .filter((c) -> !c.visited && !c.hasHunter)
-                .sorted(comparingInt((c) -> c.valueById.get(hunter.entityId)))
-                .findFirst();
     }
 
     private static void majEntity(int myTeamId, int entityId, int x, int y, int entityType, int state, int value) {
@@ -711,7 +508,44 @@ class Pair<T, U> {
 
 interface Strategie<T> extends Consumer<T> {
     boolean runThisStrategie();
+
+    boolean filter(T t);
+
 }
+
+class HasGhostStrategy implements Strategie<Hunter> {
+    @Override
+    public boolean runThisStrategie() {
+        return true;
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return hunter.state == Player.STATE_BUSTER_HAS_GHOST;
+    }
+
+
+    @Override
+    public void accept(Hunter hunter) {
+        if (hunter.distance(Player.myTeamCase) <= Player.RELEASE_RANGE) {
+            hunter.release();
+            Player.ghosts.get(hunter.value).captured = true;
+            LOG.debug(hunter.entityId + ": release my ghost");
+        } else {
+            //stun defensif
+            Optional<Hunter> stunableEnemy = Player.seenEnnemy.stream()
+                    .filter((e) -> e.state != Player.STATE_STUN && e.distance(hunter) < Player.STUN_RANGE)
+                    .findFirst();
+            if (hunter.lastStunTurned + 20 < Player.turn && stunableEnemy.isPresent()) {
+                hunter.stun(stunableEnemy.get());
+            } else {
+                hunter.move(Player.myTeamCase);
+                LOG.debug(hunter.entityId + ": back to home");
+            }
+        }
+    }
+}
+
 
 class StunEnemyWithGhostStrategy implements Strategie<Hunter> {
 
@@ -721,14 +555,208 @@ class StunEnemyWithGhostStrategy implements Strategie<Hunter> {
     }
 
     @Override
+    public boolean filter(Hunter hunter) {
+        return hunter.state == Player.STATE_BUSTER_HAS_GHOST;
+    }
+
+    @Override
     public void accept(final Hunter hunter) {
         Player.seenEnnemy.stream()
-                .filter((e) -> e.state == Player.STATE_BUSTER_HAS_GHOST && e.distance(hunter) < Player.STUN_RANGE)
+                .filter((e) -> e.distance(hunter) < Player.STUN_RANGE)
                 .findFirst()
                 .ifPresent(hunter::stun);
     }
 }
 
+class HasStunStrategie implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return true;
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return hunter.state == Player.STATE_STUN;
+    }
+
+    @Override
+    public void accept(Hunter hunter) {
+        hunter.move(hunter);
+        LOG.debug(hunter.entityId + ":stunned");
+    }
+}
+
+
+class AlreadyTargetStrategie implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return !Player.seenGhost.isEmpty();
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return true;
+    }
+
+    @Override
+    public void accept(Hunter hunter) {
+        Optional<Ghosts> ghost = Player.seenGhost.stream()
+                .filter((g) -> !g.captured && g.huntedBy == hunter)
+                .findFirst();
+        if (ghost.isPresent()) {
+            Ghosts g = ghost.get();
+            double distance = g.distance(hunter);
+            if (distance <= Player.BUST_MAX && distance >= Player.BUST_MIN) {
+                LOG.debug(hunter.entityId + ": bust my previous unted " + g.entityId);
+                hunter.bust(g);
+            } else {
+                LOG.debug(hunter.entityId + ": move to my previous unted " + g.entityId);
+                hunter.move(g);
+            }
+        }
+    }
+
+
+}
+
+class BustStrategie implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return true;
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return true;
+    }
+
+    @Override
+    public void accept(Hunter hunter) {
+
+        Set<Ghosts> ghostsNoCapturedNoHunted = Player.seenGhost.stream()
+                .filter((g) -> !g.captured && g.huntedBy == null)
+                .collect(Collectors.toSet());
+
+        Optional<Ghosts> ghost = ghostsNoCapturedNoHunted
+                .stream()
+                .filter((g) -> {
+                    double distance = g.distance(hunter);
+                    return distance <= Player.BUST_MAX && distance >= Player.BUST_MIN;
+                })
+                .sorted(comparingInt((g) -> g.state))
+                .findFirst();
+        if (ghost.isPresent()) {
+            Ghosts g = ghost.get();
+            LOG.debug(hunter.entityId + ": bust " + g.entityId);
+            hunter.bust(g);
+            g.huntedBy = hunter;
+        }
+    }
+
+}
+
+class MoveToGhostSeenStrategie implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return !Player.seenGhost.isEmpty();
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return true;
+    }
+
+    @Override
+    public void accept(Hunter hunter) {
+        Set<Ghosts> ghostsNoCapturedNoHunted = Player.seenGhost.stream()
+                .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
+        Optional<Ghosts> ghost = ghostsNoCapturedNoHunted.stream()
+                .filter((g) -> g.distance(hunter) <= Player.VISION_RANGE)
+                .sorted(comparingInt((g) -> g.state))
+                .findFirst();
+        if (ghost.isPresent()) {
+            Ghosts g = ghost.get();
+            LOG.debug(hunter.entityId + ": move to seen " + g.entityId);
+            hunter.move(g);
+            g.huntedBy = hunter;
+        }
+    }
+
+
+}
+
+
+class MoveToPreviousSeenStrategie implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return true;
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return true;
+    }
+
+    @Override
+    public void accept(Hunter hunter) {
+        // va vers un fantomes deja localise
+        Optional<Ghosts> ghost = Player.ghosts.values().stream()
+                .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
+                .sorted(
+                        comparingInt((ToIntFunction<Ghosts>) (g) -> g.state)
+                                .thenComparingDouble((g) -> g.casePos.distance(hunter))
+                )
+                .findFirst();
+
+        if (ghost.isPresent()) {
+            Ghosts g = ghost.get();
+            LOG.debug(hunter.entityId + ": move to previously seen " + g.entityId);
+            hunter.move(g);
+            g.huntedBy = hunter;
+        }
+    }
+
+
+}
+
+class MoveToUnseeMapStrategie implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return true;
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return true;
+    }
+
+    @Override
+    public void accept(Hunter hunter) {
+
+        Optional<Case> notvisitedCase = getNotVisited(hunter);
+
+        Case aCase = notvisitedCase.orElseGet(() -> Player.allCase.stream().findAny().get());
+
+        aCase.hasHunter = true;
+        aCase.neighbourg.forEach((c) -> c.hasHunter = true);
+        LOG.debug(hunter.entityId + ": move to useen " + aCase);
+        hunter.move(aCase);
+    }
+
+    private static Optional<Case> getNotVisited(Hunter hunter) {
+        return Player.allCase.stream()
+                .filter((c) -> !c.visited && !c.hasHunter)
+                .sorted(comparingInt((c) -> c.valueById.get(hunter.entityId)))
+                .findFirst();
+    }
+
+}
 
 class LOG {
 
