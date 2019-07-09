@@ -4,6 +4,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
@@ -86,6 +87,8 @@ class Player {
         initMyTeamCase(myTeamId);
         initGhost(ghostCount);
 
+        Strategie<Hunter> strategies[] = asArray(new StunEnemyWithGhostStrategy());
+
         // game loop
         while (true) {
 
@@ -109,10 +112,21 @@ class Player {
             majVisited();
             majGhost();
 
+            int i = 0;
+
+
+
             //recherche des actions
             actionStunned();
             actionHasGhost();
-            actionStunEnemyWithGhost();
+//            actionStunEnemyWithGhost();
+            while (i < strategies.length) {
+                Strategie<Hunter> strategy = strategies[i];
+                if(strategy.runThisStrategie()) {
+                    myUnits.stream().filter((hunter -> hunter.action == null))
+                            .forEach(strategy::accept);
+                }
+            }
             actionAlreadyTarget();
             actionBust();
             actionMoveToGhostSeen();
@@ -125,6 +139,10 @@ class Player {
 
             turn++;
         }
+    }
+
+    private static Strategie<Hunter>[] asArray(Strategie<Hunter>... strategiies) {
+        return strategiies;
     }
 
 
@@ -177,7 +195,7 @@ class Player {
         }
         List<Ghosts> lowHpGhost = seenGhost.stream().filter((g) -> g.state < 10).collect(Collectors.toList());
 
-        if(lowHpGhost.isEmpty()) {
+        if (lowHpGhost.isEmpty()) {
             return;
         }
 
@@ -186,7 +204,7 @@ class Player {
                         .filter((e) -> g.distance(e) < BUST_MAX)
                 ).collect(Collectors.toSet());
 
-        if(enemyToStun.isEmpty()) {
+        if (enemyToStun.isEmpty()) {
             return;
         }
 
@@ -681,7 +699,7 @@ interface PathExplorer<T> {
 }
 
 
-class Pair <T,U> {
+class Pair<T, U> {
     public T first;
     public U second;
 
@@ -690,6 +708,27 @@ class Pair <T,U> {
         this.second = second;
     }
 }
+
+interface Strategie<T> extends Consumer<T> {
+    boolean runThisStrategie();
+}
+
+class StunEnemyWithGhostStrategy implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return !Player.seenEnnemy.isEmpty() && !Player.seenEnnemy.stream().allMatch((e) -> e.state == Player.STATE_STUN);
+    }
+
+    @Override
+    public void accept(final Hunter hunter) {
+        Player.seenEnnemy.stream()
+                .filter((e) -> e.state == Player.STATE_BUSTER_HAS_GHOST && e.distance(hunter) < Player.STUN_RANGE)
+                .findFirst()
+                .ifPresent(hunter::stun);
+    }
+}
+
 
 class LOG {
 
