@@ -129,14 +129,13 @@ class Player {
                 i++;
             }
 
-            myUnits.forEach((hunter) -> {
-                System.out.println(hunter.action);
-            });
+            myUnits.forEach((hunter) -> System.out.println(hunter.action));
 
             turn++;
         }
     }
 
+    @SafeVarargs
     private static Strategie<Hunter>[] asArray(Strategie<Hunter>... strategiies) {
         return strategiies;
     }
@@ -214,7 +213,7 @@ class Player {
                     latch));
 
         });
-        //wait all patch calculated
+        //wait all path calculated
         try {
             latch.await(50, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -246,10 +245,7 @@ class Player {
             }
             seenEnnemy.add((Hunter) e);
         }
-        //LOG.debug(e);
-//        if (!(e instanceof Ghosts) || e.casePos == null) {
         e.casePos = aCase;
-//        }
         e.x = x;
         e.y = y;
         e.state = state;
@@ -454,9 +450,8 @@ class PathCalculator<T extends PathExplorer<T>> implements Runnable {
 
             T current = queue.poll();
             Integer currentValuePlusOne = getValue.apply(current) + 1;
-            current.getNeighbourg().forEach((n) -> {
-                calculateNeighbourg(current, currentValuePlusOne, n);
-            });
+            current.getNeighbourg()
+                    .forEach((n) -> calculateNeighbourg(current, currentValuePlusOne, n));
         }
         latch.countDown();
     }
@@ -497,8 +492,8 @@ interface PathExplorer<T> {
 
 
 class Pair<T, U> {
-    public T first;
-    public U second;
+    T first;
+    U second;
 
     public Pair(T first, U second) {
         this.first = first;
@@ -645,9 +640,7 @@ class BustStrategie implements Strategie<Hunter> {
                 .filter((g) -> {
                     double distance = g.distance(hunter);
                     return distance <= Player.BUST_MAX && distance >= Player.BUST_MIN;
-                })
-                .sorted(comparingInt((g) -> g.state))
-                .findFirst();
+                }).min(comparingInt((g) -> g.state));
         if (ghost.isPresent()) {
             Ghosts g = ghost.get();
             LOG.debug(hunter.entityId + ": bust " + g.entityId);
@@ -676,8 +669,7 @@ class MoveToGhostSeenStrategie implements Strategie<Hunter> {
                 .filter((g) -> !g.captured && g.huntedBy == null).collect(Collectors.toSet());
         Optional<Ghosts> ghost = ghostsNoCapturedNoHunted.stream()
                 .filter((g) -> g.distance(hunter) <= Player.VISION_RANGE)
-                .sorted(comparingInt((g) -> g.state))
-                .findFirst();
+                .min(comparingInt((g) -> g.state));
         if (ghost.isPresent()) {
             Ghosts g = ghost.get();
             LOG.debug(hunter.entityId + ": move to seen " + g.entityId);
@@ -707,11 +699,8 @@ class MoveToPreviousSeenStrategie implements Strategie<Hunter> {
         // va vers un fantomes deja localise
         Optional<Ghosts> ghost = Player.ghosts.values().stream()
                 .filter((g) -> !g.captured && g.huntedBy == null && g.casePos != null)
-                .sorted(
-                        comparingInt((ToIntFunction<Ghosts>) (g) -> g.state)
-                                .thenComparingDouble((g) -> g.casePos.distance(hunter))
-                )
-                .findFirst();
+                .min(comparingInt((ToIntFunction<Ghosts>) (g) -> g.state)
+                        .thenComparingDouble((g) -> g.casePos.distance(hunter)));
 
         if (ghost.isPresent()) {
             Ghosts g = ghost.get();
@@ -752,31 +741,26 @@ class MoveToUnseeMapStrategie implements Strategie<Hunter> {
     private static Optional<Case> getNotVisited(Hunter hunter) {
         return Player.allCase.stream()
                 .filter((c) -> !c.visited && !c.hasHunter)
-                .sorted(comparingInt((c) -> c.valueById.get(hunter.entityId)))
-                .findFirst();
+                .min(comparingInt((c) -> c.valueById.get(hunter.entityId)));
     }
 
 }
 
 class LOG {
 
-    public static void debug(Collection<Ghosts> entity) {
-        System.err.println(entity.size());
-    }
-
-    public static void debug(Object string) {
+    static void debug(Object string) {
         System.err.println(string);
     }
 
-    public static void debug(char c) {
+    static void debug(char c) {
         System.err.println(c);
     }
 
-    public static void debugNoReturn(Object s) {
+    static void debugNoReturn(Object s) {
         System.err.print(s);
     }
 
-    public static void debugNoReturn(char c) {
+    static void debugNoReturn(char c) {
         System.err.print(c);
     }
 }
