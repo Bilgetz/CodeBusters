@@ -346,6 +346,29 @@ class Hunter extends Entity {
         this.action = "RELEASE";
     }
 
+    public void move(Ghosts pos) {
+        //on ne s'approche jamais a plus de 1000 d'un ghost
+        int xMove = pos.x;
+        int yMove = pos.y;
+        if(this.x == pos.x) {
+            yMove += this.y > pos.y ? 1000 : -1000;
+        } else if(this.y == pos.y) {
+            xMove += this.x > pos.x ? 1000 : -1000;
+        } else {
+            //thales = de/bd  = ae/ac = ad/ab
+            double ab = this.distance(pos);
+            int ad = 1000;
+            int ac = pos.y - this.y;
+            int bc = pos.x - this.x;
+            double ae = ad / ab * ac;
+            double de = ad / ab * bc;
+            xMove = (int) (pos.x - de);
+            yMove = (int) (pos.y - ae);
+
+        }
+
+        this.move(xMove, yMove);
+    }
     public void move(Position pos) {
         this.move(pos.x, pos.y);
     }
@@ -612,7 +635,6 @@ class AlreadyTargetStrategie implements Strategie<Hunter> {
             }
         }
     }
-
 
 }
 
