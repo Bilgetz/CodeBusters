@@ -93,7 +93,6 @@ class Player {
         initGhost(ghostCount);
 
 
-
         // game loop
         while (true) {
 
@@ -178,24 +177,14 @@ class Player {
      */
     private static void majVisited() {
         myUnits.forEach((u) -> {
-            Queue<Case> queues = new ArrayDeque<>();
-            queues.add(u.casePos);
-            Set<Case> allVisited = new HashSet<>();
-            int entityId = u.entityId;
-            while (!queues.isEmpty()) {
-                Case c = queues.poll();
-                allVisited.add(c);
+            Set<Case> inRange = PathCalculator.getInRange(u.casePos, NB_CASE_VISION, (c) -> c.valueById.get(u.entityId));
+            inRange.forEach((c) -> {
                 c.visited = true;
                 c.seenThisturn = true;
-                c.neighbourg.forEach((n) -> {
-                    Integer nValue = n.valueById.get(entityId);
-                    if (!allVisited.contains(n) && nValue <= NB_CASE_VISION) {
-                        queues.add(n);
-                    }
-                });
-            }
-
+            });
         });
+
+
     }
 
     /**
@@ -350,9 +339,9 @@ class Hunter extends Entity {
         //on ne s'approche jamais a plus de 1000 d'un ghost
         int xMove = pos.x;
         int yMove = pos.y;
-        if(this.x == pos.x) {
+        if (this.x == pos.x) {
             yMove += this.y > pos.y ? 1000 : -1000;
-        } else if(this.y == pos.y) {
+        } else if (this.y == pos.y) {
             xMove += this.x > pos.x ? 1000 : -1000;
         } else {
             //thales = de/bd  = ae/ac = ad/ab
@@ -369,6 +358,7 @@ class Hunter extends Entity {
 
         this.move(xMove, yMove);
     }
+
     public void move(Position pos) {
         this.move(pos.x, pos.y);
     }
@@ -488,6 +478,25 @@ class PathCalculator<T extends PathExplorer<T>> implements Runnable {
             }
         }
     }
+
+    public static <T extends PathExplorer<T>> Set<T> getInRange(T starting, int range, Function<T, Integer> getValue) {
+        Queue<T> queues = new ArrayDeque<>();
+        queues.add(starting);
+        Set<T> inRange = new HashSet<>();
+        while (!queues.isEmpty()) {
+            T c = queues.poll();
+            inRange.add(c);
+            c.getNeighbourg().forEach((n) -> {
+                Integer nValue = getValue.apply(n);
+                if (!inRange.contains(n) && nValue <= range) {
+                    queues.add(n);
+                }
+            });
+        }
+        return inRange;
+
+    }
+
 }
 
 
@@ -755,7 +764,11 @@ class MoveToUnseeMapStrategie implements Strategie<Hunter> {
         Case aCase = notvisitedCase.orElseGet(() -> Player.allCase.stream().findAny().get());
 
         aCase.hasHunter = true;
+        //FIXME meilleur truc
         aCase.neighbourg.forEach((c) -> c.hasHunter = true);
+        Set<Case> inRange = PathCalculator.getInRange(hunter.casePos, Player.NB_CASE_VISION, (c) -> c.valueById.get(hunter.entityId));
+        inRange.forEach((c) -> c.hasHunter = true);
+
         LOG.debug(hunter.entityId + ": move to useen " + aCase);
         hunter.move(aCase);
     }
