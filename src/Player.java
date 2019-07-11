@@ -62,6 +62,7 @@ class Player {
     public static Case[][] caseMap = new Case[NB_WIDTH][NB_HEIGTH];
     public static Collection<Case> allCase = new ArrayList<>(NB_WIDTH * NB_HEIGTH);
     public static Case myTeamCase;
+    public static Case enemyTeamCaseForStun;
 
 
     private static Strategie<Hunter> strategies[] = asArray(
@@ -73,6 +74,10 @@ class Player {
             new MoveToGhostSeenStrategie(),
             new MoveToPreviousSeenStrategie(),
             new MoveToUnseeMapStrategie()
+    );
+
+    private static GroupStrategie<Hunter> groupStrategies[] = asArray(
+            new OneMoveToEnemyBaseForStun()
     );
 
 
@@ -117,6 +122,15 @@ class Player {
             majGhost();
 
             int i = 0;
+            while (i < groupStrategies.length) {
+                GroupStrategie<Hunter> strategy = groupStrategies[i];
+                if (strategy.runThisStrategie() && strategy.filter(myUnits)) {
+                    strategy.accept(myUnits);
+                }
+                i++;
+            }
+
+            i = 0;
             while (i < strategies.length) {
                 Strategie<Hunter> strategy = strategies[i];
                 if (strategy.runThisStrategie()) {
@@ -135,7 +149,7 @@ class Player {
     }
 
     @SafeVarargs
-    private static Strategie<Hunter>[] asArray(Strategie<Hunter>... strategiies) {
+    private static <T> T[] asArray(T... strategiies) {
         return strategiies;
     }
 
@@ -148,12 +162,17 @@ class Player {
 
     private static void initMyTeamCase(int myTeamId) {
         myTeamCase = new Case();
+        enemyTeamCaseForStun = new Case();
         if (myTeamId == 0) {
             myTeamCase.x = 0;
             myTeamCase.y = 0;
+            enemyTeamCaseForStun.x = MAX_WIDTH - 2000;
+            enemyTeamCaseForStun.y = MAX_HEIGTH - 2000;
         } else {
             myTeamCase.x = MAX_WIDTH;
             myTeamCase.y = MAX_HEIGTH;
+            enemyTeamCaseForStun.x = 2000;
+            enemyTeamCaseForStun.y = 2000;
         }
     }
 
@@ -533,12 +552,64 @@ class Pair<T, U> {
     }
 }
 
+interface GroupStrategie<T> extends Strategie<Collection<T>> {
+}
+
+
 interface Strategie<T> extends Consumer<T> {
     boolean runThisStrategie();
 
     boolean filter(T t);
 
 }
+
+class OneMoveToEnemyBaseForStun implements GroupStrategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return true;
+    }
+
+    @Override
+    public boolean filter(Collection<Hunter> hunters) {
+        return hunters.stream().allMatch((h) -> h.casePos != Player.enemyTeamCaseForStun);
+    }
+
+    @Override
+    public void accept(Collection<Hunter> hunters) {
+
+        hunters.stream()
+                .filter((h) -> h.state != Player.STATE_STUN && h.state != Player.STATE_BUSTER_HAS_GHOST && h.lastStunTurned > Player.turn + 20)
+                .min(Comparator.comparingDouble(value -> value.distance(Player.enemyTeamCaseForStun)))
+                .ifPresent((h) -> h.move(Player.enemyTeamCaseForStun));
+
+    }
+}
+
+class CampForStunStrategy implements Strategie<Hunter> {
+
+    @Override
+    public boolean runThisStrategie() {
+        return true;
+    }
+
+    @Override
+    public boolean filter(Hunter hunter) {
+        return hunter.casePos.distance(Player.enemyTeamCaseForStun) == 0;
+    }
+
+    @Override
+    public void accept(Hunter hunter) {
+        Optional<Hunter> enemy = Player.seenEnnemy.stream().filter((e) -> e.distance(hunter) < Player.STUN_RANGE).findFirst();
+        if(enemy.isPresent()) {
+            hunter.stun(enemy.get());
+        } else {
+            hunter.move(hunter);
+        }
+    }
+}
+
+
 
 class HasGhostStrategy implements Strategie<Hunter> {
     @Override
@@ -663,7 +734,7 @@ class BustStrategie implements Strategie<Hunter> {
     public void accept(Hunter hunter) {
 
         Set<Ghosts> ghostsNoCapturedNoHunted = Player.seenGhost.stream()
-                .filter((g) -> !g.captured && g.huntedBy == null)
+                .filter((g) -> !g.captured && (g.huntedBy == null || g.state > 10))
                 .collect(Collectors.toSet());
 
         Optional<Ghosts> ghost = ghostsNoCapturedNoHunted
