@@ -77,7 +77,7 @@ class Player {
     );
 
     private static GroupStrategie<Hunter> groupStrategies[] = asArray(
-            new OneMoveToEnemyBaseForStun()
+            new OneMoveToEnemyBaseForStunGroupStrategie()
     );
 
 
@@ -563,7 +563,7 @@ interface Strategie<T> extends Consumer<T> {
 
 }
 
-class OneMoveToEnemyBaseForStun implements GroupStrategie<Hunter> {
+class OneMoveToEnemyBaseForStunGroupStrategie implements GroupStrategie<Hunter> {
 
     @Override
     public boolean runThisStrategie() {
@@ -577,9 +577,9 @@ class OneMoveToEnemyBaseForStun implements GroupStrategie<Hunter> {
 
     @Override
     public void accept(Collection<Hunter> hunters) {
-
+        LOG.debug("OneMoveToEnemyBaseForStunGroupStrategie");
         hunters.stream()
-                .filter((h) -> h.state != Player.STATE_STUN && h.state != Player.STATE_BUSTER_HAS_GHOST && h.lastStunTurned > Player.turn + 20)
+                .filter((h) -> h.state != Player.STATE_STUN && h.state != Player.STATE_BUSTER_HAS_GHOST && h.lastStunTurned + 20 < Player.turn )
                 .min(Comparator.comparingDouble(value -> value.distance(Player.enemyTeamCaseForStun)))
                 .ifPresent((h) -> h.move(Player.enemyTeamCaseForStun));
 
