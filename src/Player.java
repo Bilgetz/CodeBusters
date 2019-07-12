@@ -8,6 +8,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Comparator.comparingInt;
 
@@ -577,11 +578,25 @@ class OneMoveToEnemyBaseForStunGroupStrategie implements GroupStrategie<Hunter> 
 
     @Override
     public void accept(Collection<Hunter> hunters) {
-        LOG.debug("OneMoveToEnemyBaseForStunGroupStrategie");
-        hunters.stream()
-                .filter((h) -> h.state != Player.STATE_STUN && h.state != Player.STATE_BUSTER_HAS_GHOST && h.lastStunTurned + 20 < Player.turn )
-                .min(Comparator.comparingDouble(value -> value.distance(Player.enemyTeamCaseForStun)))
-                .ifPresent((h) -> h.move(Player.enemyTeamCaseForStun));
+        Optional<Hunter> hunterOncase = hunters.stream().filter((h) -> h.lastStunTurned + 20 < Player.turn &&  h.distance(Player.enemyTeamCaseForStun) < 1).findFirst();
+        if (hunterOncase.isPresent()) {
+            //deja sur la case et peut stun
+            final Hunter hunter = hunterOncase.get();
+            Optional<Hunter> enemy = Player.seenEnnemy.stream()
+                    .filter((e) -> e.state == Player.STATE_BUSTER_HAS_GHOST && e.distance(hunter) < Player.STUN_RANGE)
+                    .findFirst();
+            if(enemy.isPresent()) {
+                hunter.stun(enemy.get());
+            } else {
+                hunter.move(hunter);
+            }
+
+        } else {
+            hunters.stream()
+                    .filter((h) -> h.state != Player.STATE_STUN && h.state != Player.STATE_BUSTER_HAS_GHOST && h.lastStunTurned + 20 < Player.turn)
+                    .min(Comparator.comparingDouble(value -> value.distance(Player.enemyTeamCaseForStun)))
+                    .ifPresent((h) -> h.move(Player.enemyTeamCaseForStun));
+        }
 
     }
 }
@@ -601,14 +616,13 @@ class CampForStunStrategy implements Strategie<Hunter> {
     @Override
     public void accept(Hunter hunter) {
         Optional<Hunter> enemy = Player.seenEnnemy.stream().filter((e) -> e.distance(hunter) < Player.STUN_RANGE).findFirst();
-        if(enemy.isPresent()) {
+        if (enemy.isPresent()) {
             hunter.stun(enemy.get());
         } else {
             hunter.move(hunter);
         }
     }
 }
-
 
 
 class HasGhostStrategy implements Strategie<Hunter> {
@@ -732,6 +746,11 @@ class BustStrategie implements Strategie<Hunter> {
 
     @Override
     public void accept(Hunter hunter) {
+        if (Player.seenEnnemy.size() >= 2) {
+            if (Player.seenEnnemy.stream().allMatch((e) -> e.distance(hunter) < Player.VISION_RANGE)) {
+                return;
+            }
+        }
 
         Set<Ghosts> ghostsNoCapturedNoHunted = Player.seenGhost.stream()
                 .filter((g) -> !g.captured && (g.huntedBy == null || g.state > 10))
